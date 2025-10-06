@@ -9,9 +9,6 @@ const CloneDetector = require('./CloneDetector');
 const CloneStorage = require('./CloneStorage');
 const FileStorage = require('./FileStorage');
 
-
-// Express and Formidable stuff to receice a file for further processing
-// --------------------
 const form = formidable({multiples:false});
 
 app.post('/', fileReceiver );
@@ -24,11 +21,12 @@ function fileReceiver(req, res, next) {
 }
 
 app.get('/', viewClones );
+app.get('/timers', viewTimers );
 
 const server = app.listen(PORT, () => { console.log('Listening for files on port', PORT); });
 
-
-// Page generation for viewing current progress
+// --------------------
+// Stats + page generation
 // --------------------
 function getStatistics() {
     let cloneStore = CloneStorage.getInstance();
@@ -83,6 +81,7 @@ function listProcessedFilesHTML() {
 function viewClones(req, res, next) {
     let page='<HTML><HEAD><TITLE>CodeStream Clone Detector</TITLE></HEAD>\n';
     page += '<BODY><H1>CodeStream Clone Detector</H1>\n';
+    page += '<p><a href="/timers">View detailed timers</a></p>\n';
     page += '<P>' + getStatistics() + '</P>\n';
     page += lastFileTimersHTML() + '\n';
     page += listClonesHTML() + '\n';
@@ -91,9 +90,54 @@ function viewClones(req, res, next) {
     res.send(page);
 }
 
-// Some helper functions
 // --------------------
-// PASS is used to insert functions in a Promise stream and pass on all input parameters untouched.
+// Timers page
+// --------------------
+let ALL_TIMERS = [];
+
+function viewTimers(req, res, next) {
+    let page = '<HTML><HEAD><TITLE>Timing Statistics</TITLE></HEAD><BODY>';
+    page += '<H1>Timing statistics</H1>';
+
+    if (ALL_TIMERS.length === 0) {
+        page += '<p>No timing data yet.</p>';
+    } else {
+        let totalSum = 0n;
+        let matchSum = 0n;
+        let lineSum = 0;
+
+        ALL_TIMERS.forEach(entry => {
+            totalSum += entry.total;
+            matchSum += entry.match;
+            lineSum += entry.lines;
+        });
+
+        page += '<p>Average total µs: ' + (totalSum / BigInt(ALL_TIMERS.length)) + '</p>';
+        page += '<p>Average match µs: ' + (matchSum / BigInt(ALL_TIMERS.length)) + '</p>';
+        page += '<p>Average µs/line: ' + (lineSum ? (Number(totalSum/BigInt(ALL_TIMERS.length)) / (lineSum/ALL_TIMERS.length)).toFixed(2) : 0) + '</p>';
+
+        page += '<table border="1"><tr><th>File</th><th>Total (µs)</th><th>Match (µs)</th><th>µs/line</th></tr>';
+
+        ALL_TIMERS.forEach(entry => {
+            page += '<tr>';
+            page += '<td>' + entry.name + '</td>';
+            page += '<td>' + entry.total + '</td>';
+            page += '<td>' + entry.match + '</td>';
+            page += '<td>' + entry.perLine + '</td>';
+            page += '</tr>';
+        });
+
+        page += '</table>';
+    }
+
+    page += '</BODY></HTML>';
+    res.send(page);
+}
+
+
+// --------------------
+// Helper functions
+// --------------------
 PASS = fn => d => {
     try {
         fn(d);
@@ -118,10 +162,10 @@ function maybePrintStatistics(file, cloneDetector, cloneStore) {
         console.log(str);
         console.log('List of found clones available at', URL);
     }
-
     return file;
 }
 
+// --------------------
 // Processing of the file
 // --------------------
 function processFile(filename, contents) {
@@ -129,7 +173,6 @@ function processFile(filename, contents) {
     let cloneStore = CloneStorage.getInstance();
 
     return Promise.resolve({name: filename, contents: contents} )
-        //.then( PASS( (file) => console.log('Processing file:', file.name) ))
         .then( (file) => Timer.startTimer(file, 'total') )
         .then( (file) => cd.preprocess(file) )
         .then( (file) => cd.transform(file) )
@@ -141,20 +184,20 @@ function processFile(filename, contents) {
 
         .then( (file) => cd.storeFile(file) )
         .then( (file) => Timer.endTimer(file, 'total') )
-        .then( PASS( (file) => lastFile = file ))
+        .then( PASS( (file) => {
+            lastFile = file;
+            let timers = Timer.getTimers(file);
+            let total = timers.total / 1000n;
+            let match = timers.match / 1000n;
+            let lines = file.contents.split("\n").length;
+            ALL_TIMERS.push({
+                name: file.name,
+                total: total,
+                match: match,
+                lines: lines,
+                perLine: lines>0 ? (Number(total)/lines).toFixed(2) : 0
+            });
+        }))
         .then( PASS( (file) => maybePrintStatistics(file, cd, cloneStore) ))
-    // TODO Store the timers from every file (or every 10th file), create a new landing page /timers
-    // and display more in depth statistics there. Examples include:
-    // average times per file, average times per last 100 files, last 1000 files.
-    // Perhaps throw in a graph over all files.
         .catch( console.log );
 };
-
-/*
-1. Preprocessing: Remove uninteresting code, determine source and comparison units/granularities
-2. Transformation: One or more extraction and/or transformation techniques are applied to the preprocessed code to obtain an intermediate representation of the code.
-3. Match Detection: Transformed units (and/or metrics for those units) are compared to find similar source units.
-4. Formatting: Locations of identified clones in the transformed units are mapped to the original code base by file location and line number.
-5. Post-Processing and Filtering: Visualisation of clones and manual analysis to filter out false positives
-6. Aggregation: Clone pairs are aggregated to form clone classes or families, in order to reduce the amount of data and facilitate analysis.
-*/
