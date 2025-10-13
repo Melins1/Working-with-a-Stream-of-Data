@@ -10,6 +10,13 @@
 (def hostname (or (System/getenv "DBHOST") DEFAULT-DBHOST))
 (def collnames ["files"  "chunks" "candidates" "clones"])
 
+(defn addUpdate! [update]
+  (let [conn (mg/connect {:host hostname})
+        db (mg/get-db conn dbname)
+        collname "statusUpdates"]
+    (mc/insert db collname update)))
+
+
 (defn print-statistics []
   (let [conn (mg/connect {:host hostname})        
         db (mg/get-db conn dbname)]
