@@ -9,7 +9,7 @@ services:
       - 8080:3000
     volumes:
       - ./Containers/cljdetector:/usr/src/app
-      - qc-volume:/QualitasCorpus
+      - corpusgetter_qc-volume:/QualitasCorpus
     environment:
       DBHOST: dbstorage
       SOURCEDIRtest: "/usr/src/app/test/data"
@@ -28,10 +28,19 @@ services:
     volumes:
       - dbstorage:/data/db
       - dbconfig:/data/configdb
+
+  monitortool:
+    build: ./Containers/Monitortool
+    ports:
+      - 3000:3000
+    depends_on:
+      - dbstorage
+    environment:
+      MONGO_URI: "mongodb://dbstorage:27017/cloneDetector"
     
 volumes:
   dbstorage:
   dbconfig:
-  qc-volume:
+  corpusgetter_qc-volume:
     external: true
     
